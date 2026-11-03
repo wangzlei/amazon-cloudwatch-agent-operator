@@ -255,6 +255,9 @@ func (i *sdkInjector) inject(ctx context.Context, insts languageInstrumentations
 		}
 	}
 
+	// Injector mode: one LD_PRELOAD per container that has a language injected through the injector.
+	pod = applyInjectorPreload(pod)
+
 	return pod
 }
 

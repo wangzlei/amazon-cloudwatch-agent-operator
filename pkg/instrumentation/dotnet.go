@@ -101,20 +101,26 @@ func injectDotNetSDK(dotNetSpec v1alpha1.DotNet, pod corev1.Pod, index int, runt
 		concatEnvValues      = true
 	)
 
-	setDotNetEnvVar(container, envDotNetCoreClrEnableProfiling, dotNetCoreClrEnableProfilingEnabled, doNotConcatEnvValues)
-	setDotNetEnvVar(container, envDotNetCoreClrProfiler, dotNetCoreClrProfilerID, doNotConcatEnvValues)
-	if isWindowsPod(pod) {
-		setDotNetEnvVar(container, envDotNetCoreClrProfilerPath, dotNetCoreClrProfilerPathWindows, doNotConcatEnvValues)
-		setDotNetEnvVar(container, envDotNetStartupHook, dotNetStartupHookPathWindows, concatEnvValues)
-		setDotNetEnvVar(container, envDotNetAdditionalDeps, dotNetAdditionalDepsPathWindows, concatEnvValues)
-		setDotNetEnvVar(container, envDotNetOTelAutoHome, dotNetOTelAutoHomePathWindows, doNotConcatEnvValues)
-		setDotNetEnvVar(container, envDotNetSharedStore, dotNetSharedStorePathWindows, concatEnvValues)
+	if useInjector("DOTNET", dotNetSpec.Image, pod, container) {
+		// The injector sets CORECLR_*, DOTNET_STARTUP_HOOKS, DOTNET_ADDITIONAL_DEPS, DOTNET_SHARED_STORE and
+		// OTEL_DOTNET_AUTO_HOME in each process, choosing the glibc or musl build itself (no runtime annotation).
+		setInjectorEnv(container, envInjectorDotNetPathPrefix, dotnetInstrMountPath)
 	} else {
-		setDotNetEnvVar(container, envDotNetCoreClrProfilerPath, coreClrProfilerPath, doNotConcatEnvValues)
-		setDotNetEnvVar(container, envDotNetStartupHook, dotNetStartupHookPath, concatEnvValues)
-		setDotNetEnvVar(container, envDotNetAdditionalDeps, dotNetAdditionalDepsPath, concatEnvValues)
-		setDotNetEnvVar(container, envDotNetOTelAutoHome, dotNetOTelAutoHomePath, doNotConcatEnvValues)
-		setDotNetEnvVar(container, envDotNetSharedStore, dotNetSharedStorePath, concatEnvValues)
+		setDotNetEnvVar(container, envDotNetCoreClrEnableProfiling, dotNetCoreClrEnableProfilingEnabled, doNotConcatEnvValues)
+		setDotNetEnvVar(container, envDotNetCoreClrProfiler, dotNetCoreClrProfilerID, doNotConcatEnvValues)
+		if isWindowsPod(pod) {
+			setDotNetEnvVar(container, envDotNetCoreClrProfilerPath, dotNetCoreClrProfilerPathWindows, doNotConcatEnvValues)
+			setDotNetEnvVar(container, envDotNetStartupHook, dotNetStartupHookPathWindows, concatEnvValues)
+			setDotNetEnvVar(container, envDotNetAdditionalDeps, dotNetAdditionalDepsPathWindows, concatEnvValues)
+			setDotNetEnvVar(container, envDotNetOTelAutoHome, dotNetOTelAutoHomePathWindows, doNotConcatEnvValues)
+			setDotNetEnvVar(container, envDotNetSharedStore, dotNetSharedStorePathWindows, concatEnvValues)
+		} else {
+			setDotNetEnvVar(container, envDotNetCoreClrProfilerPath, coreClrProfilerPath, doNotConcatEnvValues)
+			setDotNetEnvVar(container, envDotNetStartupHook, dotNetStartupHookPath, concatEnvValues)
+			setDotNetEnvVar(container, envDotNetAdditionalDeps, dotNetAdditionalDepsPath, concatEnvValues)
+			setDotNetEnvVar(container, envDotNetOTelAutoHome, dotNetOTelAutoHomePath, doNotConcatEnvValues)
+			setDotNetEnvVar(container, envDotNetSharedStore, dotNetSharedStorePath, concatEnvValues)
+		}
 	}
 
 	container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{

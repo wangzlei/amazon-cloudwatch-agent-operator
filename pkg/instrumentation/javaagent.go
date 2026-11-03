@@ -21,8 +21,9 @@ const (
 )
 
 var (
-	javaCommandLinux   = []string{"cp", "/javaagent.jar", javaInstrMountPath + "/javaagent.jar"}
-	javaCommandWindows = []string{"CMD", "/c", "copy", "javaagent.jar", javaInstrMountPathWindows}
+	javaCommandLinux    = []string{"cp", "/javaagent.jar", javaInstrMountPath + "/javaagent.jar"}
+	javaCommandWindows  = []string{"CMD", "/c", "copy", "javaagent.jar", javaInstrMountPathWindows}
+	javaCommandLinuxDir = []string{"cp", "-r", "/autoinstrumentation/.", javaInstrMountPath}
 )
 
 func injectJavaagent(javaSpec v1alpha1.Java, pod corev1.Pod, index int, allEnvs []corev1.EnvVar) (corev1.Pod, error) {
@@ -45,14 +46,19 @@ func injectJavaagent(javaSpec v1alpha1.Java, pod corev1.Pod, index int, allEnvs 
 		}
 	}
 
-	idx := getIndexOfEnv(container.Env, envJavaToolsOptions)
-	if idx == -1 {
-		container.Env = append(container.Env, corev1.EnvVar{
-			Name:  envJavaToolsOptions,
-			Value: javaJVMArgument,
-		})
+	if useInjector("JAVA", javaSpec.Image, pod, container) {
+		// The injector adds the -javaagent flag to JAVA_TOOL_OPTIONS in each process.
+		setInjectorEnv(container, envInjectorJavaAgentPath, injectorJavaAgentPath)
 	} else {
-		container.Env[idx].Value = container.Env[idx].Value + javaJVMArgument
+		idx := getIndexOfEnv(container.Env, envJavaToolsOptions)
+		if idx == -1 {
+			container.Env = append(container.Env, corev1.EnvVar{
+				Name:  envJavaToolsOptions,
+				Value: javaJVMArgument,
+			})
+		} else {
+			container.Env[idx].Value = container.Env[idx].Value + javaJVMArgument
+		}
 	}
 
 	container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
@@ -73,6 +79,9 @@ func injectJavaagent(javaSpec v1alpha1.Java, pod corev1.Pod, index int, allEnvs 
 		command := javaCommandLinux
 		if isWindowsPod(pod) {
 			command = javaCommandWindows
+		} else if imageCarriesInjector("JAVA", javaSpec.Image) {
+			// The injector-carrying image has /autoinstrumentation/{javaagent.jar,injector/}: copy the directory.
+			command = javaCommandLinuxDir
 		}
 
 		pod.Spec.InitContainers = append(pod.Spec.InitContainers, corev1.Container{

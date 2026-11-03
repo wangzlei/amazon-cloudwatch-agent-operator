@@ -39,14 +39,19 @@ func injectNodeJSSDK(nodeJSSpec v1alpha1.NodeJS, pod corev1.Pod, index int, allE
 		}
 	}
 
-	idx := getIndexOfEnv(container.Env, envNodeOptions)
-	if idx == -1 {
-		container.Env = append(container.Env, corev1.EnvVar{
-			Name:  envNodeOptions,
-			Value: nodeRequireArgument,
-		})
-	} else if idx > -1 {
-		container.Env[idx].Value = container.Env[idx].Value + nodeRequireArgument
+	if useInjector("NODEJS", nodeJSSpec.Image, pod, container) {
+		// The injector adds the --require flag to NODE_OPTIONS in each process.
+		setInjectorEnv(container, envInjectorNodeJSAgentPath, injectorNodeJSAgentPath)
+	} else {
+		idx := getIndexOfEnv(container.Env, envNodeOptions)
+		if idx == -1 {
+			container.Env = append(container.Env, corev1.EnvVar{
+				Name:  envNodeOptions,
+				Value: nodeRequireArgument,
+			})
+		} else if idx > -1 {
+			container.Env[idx].Value = container.Env[idx].Value + nodeRequireArgument
+		}
 	}
 
 	container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{

@@ -44,14 +44,20 @@ func injectPythonSDK(pythonSpec v1alpha1.Python, pod corev1.Pod, index int, allE
 		}
 	}
 
-	idx := getIndexOfEnv(container.Env, envPythonPath)
-	if idx == -1 {
-		container.Env = append(container.Env, corev1.EnvVar{
-			Name:  envPythonPath,
-			Value: fmt.Sprintf("%s:%s", pythonPathPrefix, pythonPathSuffix),
-		})
-	} else if idx > -1 {
-		container.Env[idx].Value = fmt.Sprintf("%s:%s:%s", pythonPathPrefix, container.Env[idx].Value, pythonPathSuffix)
+	if useInjector("PYTHON", pythonSpec.Image, pod, container) {
+		// The injector sets PYTHONPATH in each process, in the same order as below, using the SDK build for the
+		// process's libc (<prefix>/glibc or <prefix>/musl).
+		setInjectorEnv(container, envInjectorPythonPathPrefix, pythonInstrMountPath)
+	} else {
+		idx := getIndexOfEnv(container.Env, envPythonPath)
+		if idx == -1 {
+			container.Env = append(container.Env, corev1.EnvVar{
+				Name:  envPythonPath,
+				Value: fmt.Sprintf("%s:%s", pythonPathPrefix, pythonPathSuffix),
+			})
+		} else if idx > -1 {
+			container.Env[idx].Value = fmt.Sprintf("%s:%s:%s", pythonPathPrefix, container.Env[idx].Value, pythonPathSuffix)
+		}
 	}
 
 	// Set OTEL_TRACES_EXPORTER to otlp exporter if not set by user and validation allows
