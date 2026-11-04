@@ -115,3 +115,20 @@ func createInstrumentationAnnotatorWithClientset(autoMonitorConfigStr string, au
 
 	return nil
 }
+
+// InstrumentationGuardFromConfig reads instrumentationGuard from the --auto-monitor-config JSON. It is read on its
+// own, not through configureAutoMonitor, because it applies to every injected pod: also when auto-monitor itself is
+// disabled (DISABLE_AUTO_MONITOR, the OpenTelemetry Instrumentation CRD present, or the deprecated auto-annotation
+// config in use). Returns nil when the config or the field is not set.
+func InstrumentationGuardFromConfig(autoMonitorConfigStr string) (*bool, error) {
+	if autoMonitorConfigStr == "" {
+		return nil, nil
+	}
+	var c struct {
+		InstrumentationGuard *bool `json:"instrumentationGuard"`
+	}
+	if err := json.Unmarshal([]byte(autoMonitorConfigStr), &c); err != nil {
+		return nil, fmt.Errorf("unable to read instrumentationGuard from the auto-monitor config: %w", err)
+	}
+	return c.InstrumentationGuard, nil
+}

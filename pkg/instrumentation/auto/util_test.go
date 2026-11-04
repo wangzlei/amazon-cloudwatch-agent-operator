@@ -170,3 +170,72 @@ func TestCreateInstrumentationAnnotator(t *testing.T) {
 		})
 	}
 }
+
+func TestInstrumentationGuardFromConfig(t *testing.T) {
+	tr, fa := true, false
+	tests := []struct {
+		name    string
+		config  string
+		want    *bool
+		wantErr bool
+	}{
+		{"no config", ``, nil, false},
+		{"empty config", `{}`, nil, false},
+		{"field not set", `{"monitorAllServices":true,"languages":["java"]}`, nil, false},
+		{"null", `{"instrumentationGuard":null}`, nil, false},
+		{"false", `{"monitorAllServices":true,"instrumentationGuard":false}`, &fa, false},
+		{"true", `{"monitorAllServices":false,"instrumentationGuard":true}`, &tr, false},
+		{"not a bool", `{"instrumentationGuard":"true"}`, nil, true},
+		{"invalid JSON", `{invalid-json}`, nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := InstrumentationGuardFromConfig(tt.config)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// instrumentationGuard is read independently of whether auto-monitor runs: it applies to every injected pod.
+func TestInstrumentationGuardFromConfigIgnoresAutoMonitorDisable(t *testing.T) {
+	t.Setenv("DISABLE_AUTO_MONITOR", "true")
+	got, err := InstrumentationGuardFromConfig(`{"monitorAllServices":false,"instrumentationGuard":true}`)
+	assert.NoError(t, err)
+	if assert.NotNil(t, got) {
+		assert.True(t, *got)
+	}
+}
+
+// The auto-monitor config, as the Helm chart renders it, still configures auto-monitor with the new field and with
+// fields this operator does not know (an older operator sees instrumentationGuard as such an unknown field).
+func TestConfigureAutoMonitorWithInstrumentationGuard(t *testing.T) {
+	t.Setenv("DISABLE_AUTO_MONITOR", "")
+	fakeClient := fakeclient.NewClientBuilder().Build()
+	logger := testr.New(t)
+	const base = `{"customSelector":{"java":{"deployments":["default/app"]}},"exclude":{"java":{},"namespaces":["kube-system"]},"languages":["java","python"],"monitorAllServices":true,"restartPods":false`
+	for _, tt := range []struct {
+		name   string
+		config string
+	}{
+		{"unset", base + `}`},
+		{"false", base + `,"instrumentationGuard":false}`},
+		{"true", base + `,"instrumentationGuard":true}`},
+		{"malformed value does not break auto-monitor", base + `,"instrumentationGuard":"yes"}`},
+		{"unknown future field", base + `,"instrumentationGuard":true,"someFutureField":{"x":1}}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m, err := configureAutoMonitor(context.Background(), tt.config, fake.NewSimpleClientset(), fakeClient, fakeClient, logger)
+			assert.NoError(t, err)
+			if assert.NotNil(t, m) {
+				assert.True(t, m.config.MonitorAllServices)
+				assert.Len(t, m.config.Languages, 2)
+				assert.Equal(t, []string{"default/app"}, m.config.CustomSelector.Java.Deployments)
+			}
+		})
+	}
+}

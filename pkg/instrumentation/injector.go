@@ -70,8 +70,23 @@ func SetInjectionMode(mode string) error {
 // GetInjectionMode returns the current injection mode as set.
 func GetInjectionMode() string { return injectionModeValue }
 
+// ConfigureInjectionMode sets the injection mode from the customer switch instrumentationGuard and the internal
+// --instrumentation-injection-mode flag. instrumentationGuard true wins: all four languages go through the injector
+// (same as internal mode "injector"). false or not set (nil): the internal flag decides (default "old"). The internal
+// flag is validated in every case.
+func ConfigureInjectionMode(instrumentationGuard *bool, internalMode string) error {
+	if err := SetInjectionMode(internalMode); err != nil {
+		return err
+	}
+	if instrumentationGuard != nil && *instrumentationGuard {
+		return SetInjectionMode(InjectionModeInjector)
+	}
+	return nil
+}
+
 // injectorLanguages in LD_PRELOAD preference order: the first one injected into a container provides the
-// libotelinject.so (all copies are the same file) and therefore the guard's state directory.
+// libotelinject.so that is loaded, and therefore the guard's state directory. Each language image pins its own
+// Injector version, so the copies in one pod may be different versions; only the first one is loaded.
 var injectorLanguages = []struct {
 	lang      string // AUTO_INSTRUMENTATION_<lang> holds the operator's default image
 	envName   string // set only for languages injected through the injector

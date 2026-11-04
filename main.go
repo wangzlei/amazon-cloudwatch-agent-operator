@@ -176,7 +176,7 @@ func main() {
 	stringFlagOrEnv(&dcgmExporterImage, "dcgm-exporter-image", "RELATED_IMAGE_DCGM_EXPORTER", fmt.Sprintf("%s:%s", dcgmExporterImageRepository, v.DcgmExporter), "The default DCGM Exporter image. This image is used when no image is specified in the CustomResource.")
 	stringFlagOrEnv(&neuronMonitorImage, "neuron-monitor-image", "RELATED_IMAGE_NEURON_MONITOR", fmt.Sprintf("%s:%s", neuronMonitorImageRepository, v.NeuronMonitor), "The default Neuron monitor image. This image is used when no image is specified in the CustomResource.")
 	stringFlagOrEnv(&targetAllocatorImage, "target-allocator-image", "RELATED_IMAGE_TARGET_ALLOCATOR", fmt.Sprintf("%s:%s", targetAllocatorImageRepository, v.TargetAllocator), "The default AmazonCloudWatchAgent target allocator image. This image is used when no image is specified in the CustomResource.")
-	stringFlagOrEnv(&injectionModeStr, "instrumentation-injection-mode", "INSTRUMENTATION_INJECTION_MODE", instrumentation.InjectionModeOld, "How Java, Node.js, Python and .NET are injected into Linux pods: old (language environment variables, the default), injector (all four through the OpenTelemetry Injector via LD_PRELOAD, with the ADOT start-up guard; only for the default instrumentation images), or a comma-separated list of the languages that use the injector, e.g. python.")
+	stringFlagOrEnv(&injectionModeStr, "instrumentation-injection-mode", "INSTRUMENTATION_INJECTION_MODE", instrumentation.InjectionModeOld, "INTERNAL, for testing only; will be removed once the OpenTelemetry Injector is the only injection. How Java, Node.js, Python and .NET are injected into Linux pods: old (language environment variables, the default), injector (all four through the OpenTelemetry Injector via LD_PRELOAD, with the ADOT start-up guard; only for the default instrumentation images), or a comma-separated list of the languages that use the injector, e.g. python.")
 	pflag.Parse()
 
 	// set instrumentation cpu and memory limits in environment variables to be used for default instrumentation; default values received from https://github.com/open-telemetry/opentelemetry-operator/blob/main/apis/v1alpha1/instrumentation_webhook.go
@@ -199,11 +199,20 @@ func main() {
 	}
 
 	// set supported language instrumentation images in environment variable to be used for default instrumentation
-	if err := instrumentation.SetInjectionMode(injectionModeStr); err != nil {
+	instrumentationGuard, err := auto.InstrumentationGuardFromConfig(autoMonitorConfigStr)
+	if err != nil {
+		// not fatal: an unreadable auto-monitor config keeps today's injection (and auto-monitor reports it too)
+		setupLog.Error(err, "ignoring instrumentationGuard")
+	}
+	if err := instrumentation.ConfigureInjectionMode(instrumentationGuard, injectionModeStr); err != nil {
 		setupLog.Error(err, "invalid --instrumentation-injection-mode")
 		os.Exit(1)
 	}
-	setupLog.Info("Auto-instrumentation injection mode", "mode", instrumentation.GetInjectionMode())
+	guardSetting := "unset"
+	if instrumentationGuard != nil {
+		guardSetting = fmt.Sprint(*instrumentationGuard)
+	}
+	setupLog.Info("Auto-instrumentation injection mode", "mode", instrumentation.GetInjectionMode(), "instrumentationGuard", guardSetting, "internalInjectionMode", injectionModeStr)
 	_ = os.Setenv("AUTO_INSTRUMENTATION_JAVA", autoInstrumentationJava)
 	_ = os.Setenv("AUTO_INSTRUMENTATION_PYTHON", autoInstrumentationPython)
 	_ = os.Setenv("AUTO_INSTRUMENTATION_DOTNET", autoInstrumentationDotNet)
