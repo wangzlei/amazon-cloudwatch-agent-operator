@@ -42,13 +42,14 @@ func TestConfigureInjectionModePrecedence(t *testing.T) {
 		{"unset, internal default", nil, "", InjectionModeOld, map[string]bool{}},
 		{"unset, internal old", nil, InjectionModeOld, InjectionModeOld, map[string]bool{}},
 		{"false, internal old", boolPtr(false), InjectionModeOld, InjectionModeOld, map[string]bool{}},
-		{"true, internal old", boolPtr(true), InjectionModeOld, InjectionModeInjector, all},
-		{"true, internal default", boolPtr(true), "", InjectionModeInjector, all},
+		{"true, internal old: injector-ready languages", boolPtr(true), InjectionModeOld, "python", map[string]bool{"PYTHON": true}},
+		{"true, internal default", boolPtr(true), "", "python", map[string]bool{"PYTHON": true}},
 		{"unset, internal injector", nil, InjectionModeInjector, InjectionModeInjector, all},
 		{"false, internal injector", boolPtr(false), InjectionModeInjector, InjectionModeInjector, all},
 		{"unset, internal python", nil, "python", "python", map[string]bool{"PYTHON": true}},
 		{"false, internal python", boolPtr(false), "python", "python", map[string]bool{"PYTHON": true}},
-		{"true, internal python: all four", boolPtr(true), "python", InjectionModeInjector, all},
+		{"true, internal python", boolPtr(true), "python", "python", map[string]bool{"PYTHON": true}},
+		{"true, internal nodejs: union", boolPtr(true), "nodejs", "nodejs,python", map[string]bool{"NODEJS": true, "PYTHON": true}},
 		{"true, internal injector", boolPtr(true), InjectionModeInjector, InjectionModeInjector, all},
 	}
 	for _, tt := range tests {
@@ -64,16 +65,20 @@ func TestConfigureInjectionModePrecedence(t *testing.T) {
 	}
 }
 
-func TestInstrumentationGuardTrueAllFourLanguagesThroughInjector(t *testing.T) {
+func TestInstrumentationGuardTrueOnlyInjectorReadyLanguages(t *testing.T) {
+	// Only Python's default image carries the Injector today: with all four languages injected, LD_PRELOAD must
+	// point at the Python copy and the other languages keep today's injection.
 	configureGuard(t, boolPtr(true), InjectionModeOld)
 	p := injectAll(t, basePod(), 0, defJava, defNode, defPython, defDotNet)
 	e := envOf(p.Spec.Containers[0])
-	assert.Equal(t, "/otel-auto-instrumentation-java/injector/libotelinject.so", e["LD_PRELOAD"])
-	for _, k := range []string{envInjectorJavaAgentPath, envInjectorNodeJSAgentPath, envInjectorPythonPathPrefix, envInjectorDotNetPathPrefix} {
-		assert.Contains(t, e, k)
-	}
-	for _, k := range []string{"JAVA_TOOL_OPTIONS", "NODE_OPTIONS", "PYTHONPATH", "CORECLR_PROFILER_PATH"} {
+	assert.Equal(t, "/otel-auto-instrumentation-python/injector/libotelinject.so", e["LD_PRELOAD"])
+	assert.Contains(t, e, envInjectorPythonPathPrefix)
+	assert.NotContains(t, e, "PYTHONPATH")
+	for _, k := range []string{envInjectorJavaAgentPath, envInjectorNodeJSAgentPath, envInjectorDotNetPathPrefix} {
 		assert.NotContains(t, e, k)
+	}
+	for _, k := range []string{"JAVA_TOOL_OPTIONS", "NODE_OPTIONS", "CORECLR_PROFILER_PATH"} {
+		assert.Contains(t, e, k)
 	}
 }
 
@@ -150,12 +155,13 @@ func TestInstrumentationGuardThroughPodMutator(t *testing.T) {
 		name     string
 		guard    *bool
 		internal string
-		injector bool
+		injector func(Type) bool
 	}{
-		{"unset", nil, InjectionModeOld, false},
-		{"false", boolPtr(false), InjectionModeOld, false},
-		{"true", boolPtr(true), InjectionModeOld, true},
-		{"false with internal injector", boolPtr(false), InjectionModeInjector, true},
+		{"unset", nil, InjectionModeOld, func(Type) bool { return false }},
+		{"false", boolPtr(false), InjectionModeOld, func(Type) bool { return false }},
+		// only the injector-ready languages (Python) move to the injector
+		{"true", boolPtr(true), InjectionModeOld, func(l Type) bool { return l == TypePython }},
+		{"false with internal injector", boolPtr(false), InjectionModeInjector, func(Type) bool { return true }},
 	}
 	n := 0
 	for _, g := range guards {
@@ -175,7 +181,7 @@ func TestInstrumentationGuardThroughPodMutator(t *testing.T) {
 					got, err := mutator.Mutate(context.Background(), ns, pod)
 					require.NoError(t, err)
 					e := envOf(got.Spec.Containers[0])
-					if g.injector {
+					if g.injector(l.typ) {
 						assert.Equal(t, l.library, e["LD_PRELOAD"])
 						assert.Contains(t, e, l.injEnv)
 						assert.NotContains(t, e, l.oldEnv)

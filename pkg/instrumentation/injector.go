@@ -6,6 +6,7 @@ package instrumentation
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -70,18 +71,36 @@ func SetInjectionMode(mode string) error {
 // GetInjectionMode returns the current injection mode as set.
 func GetInjectionMode() string { return injectionModeValue }
 
+// injectorReadyLanguages are the languages whose default instrumentation image (the one the add-on pins) carries
+// the Injector. instrumentationGuard true moves only these to the injector: a language whose image lacks
+// libotelinject.so would otherwise get an LD_PRELOAD that names a missing file, and the container would run without
+// any SDK. Add a language here once its default image ships the Injector.
+var injectorReadyLanguages = []string{"python"}
+
 // ConfigureInjectionMode sets the injection mode from the customer switch instrumentationGuard and the internal
-// --instrumentation-injection-mode flag. instrumentationGuard true wins: all four languages go through the injector
-// (same as internal mode "injector"). false or not set (nil): the internal flag decides (default "old"). The internal
-// flag is validated in every case.
+// --instrumentation-injection-mode flag. The internal flag is validated in every case and decides on its own when
+// instrumentationGuard is false or not set (nil; default "old"). instrumentationGuard true adds the
+// injectorReadyLanguages to the languages the internal flag already moves to the injector.
 func ConfigureInjectionMode(instrumentationGuard *bool, internalMode string) error {
 	if err := SetInjectionMode(internalMode); err != nil {
 		return err
 	}
-	if instrumentationGuard != nil && *instrumentationGuard {
-		return SetInjectionMode(InjectionModeInjector)
+	if instrumentationGuard == nil || !*instrumentationGuard || GetInjectionMode() == InjectionModeInjector {
+		return nil
 	}
-	return nil
+	var langs []string
+	for name, l := range injectionModeLanguages {
+		if injectorLangs[l] {
+			langs = append(langs, name)
+		}
+	}
+	for _, name := range injectorReadyLanguages {
+		if !injectorLangs[injectionModeLanguages[name]] {
+			langs = append(langs, name)
+		}
+	}
+	sort.Strings(langs)
+	return SetInjectionMode(strings.Join(langs, ","))
 }
 
 // injectorLanguages in LD_PRELOAD preference order: the first one injected into a container provides the
